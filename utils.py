@@ -47,9 +47,12 @@ def load_checkpoint(checkpoint_path, architecture, device, optimizer=None, sched
         'best_ssim': state.get('best_ssim', None),
     }
 
-def save_checkpoint(out_folder, state, step, is_best=False):
+def save_checkpoint(out_folder, state, step, is_best=False, _state=None):
     """Helper function to save checkpoints"""
-    _state = f'_{state['args'].patch_rad}{state['args'].window_rad}{state['args'].in_channel}{state['args'].latent_dim}{state['args'].latent_channel_dim}{int(state['args'].blind)}{state['args'].sigma_min}_{state['args'].sigma_max}'
+    if state == None:
+        _state = f'_{state['args'].patch_rad}{state['args'].window_rad}{state['args'].in_channel}{state['args'].latent_dim}{state['args'].latent_channel_dim}{int(state['args'].blind)}{state['args'].sigma_min}_{state['args'].sigma_max}'
+    else:
+        pass
     if is_best:
         checkpoint_path = os.path.join(out_folder, f'model{_state}_best.pth')
     else:
@@ -75,6 +78,7 @@ def calculate_psnr(batch1, batch2):
     return np.mean(psnr_scores)
 
 def calculate_ssim(batch1, batch2):
+    channels = batch1.size(1)
     batch1_np = batch1.permute(0, 2, 3, 1).detach().cpu().numpy()  
     batch2_np = batch2.permute(0, 2, 3, 1).detach().cpu().numpy()  
 
@@ -87,7 +91,7 @@ def calculate_ssim(batch1, batch2):
         # Compute SSIM for each channel and average the scores
         per_channel_ssim = [
             ssim(img1[:, :, c], img2[:, :, c], data_range=img2[:, :, c].max() - img2[:, :, c].min())
-            for c in range(3)
+            for c in range(channels)
         ]
         mean_ssim = np.mean(per_channel_ssim)  # Average across channels
         ssim_scores.append(mean_ssim)
@@ -113,24 +117,24 @@ def show_tensor_image(image_tensors : list, grid : tuple, titles=None, save=Fals
                 break
             np_image = image_tensors[index].squeeze(0).detach().cpu().numpy().transpose(1, 2, 0)
             if y>1 and x>1:
-                axs[i,j].imshow(np_image)
+                axs[i,j].imshow(np_image, cmap='gray')
                 if titles:
                     axs[i,j].set_title(titles[index])
                 axs[i,j].axis('off')
 
             elif y>1:
-                axs[j].imshow(np_image)
+                axs[j].imshow(np_image, cmap='gray')
                 if titles:
                     axs[j].set_title(titles[index])
                 axs[j].axis('off')
 
             elif x>1:
-                axs[i].imshow(np_image)
+                axs[i].imshow(np_image, cmap='gray')
                 if titles:
                     axs[i].set_title(titles[index])
                 axs[i].axis('off')
             else:
-                plt.imshow(np_image)
+                plt.imshow(np_image, cmap='gray')
                 if titles:
                     plt.set_title(titles[index])
                 plt.axis('off')

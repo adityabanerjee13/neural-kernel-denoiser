@@ -4,7 +4,8 @@ from deepinv.models import BM3D
 import os
 import matplotlib.pyplot as plt
 
-from models.NKD_linear_layer import calculate_psnr, calculate_ssim, NKD_latent_layers, load_checkpoint
+# from models.NKD_linear_layer import calculate_psnr, calculate_ssim, NKD_latent_layers, load_checkpoint
+from NKD_kenel_layer import calculate_psnr, calculate_ssim, load_checkpoint
 from denoisers.NLM_torch import NLM_tensor
 from utils import show_tensor_image
 from dataset_loaders import TestDataset, DataLoader

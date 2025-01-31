@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from dataset_loaders import create_dataloaders, TestDataset
 from models.NKD_linear_layer import NKD_latent_layers, NKD_latent_layers_v2, save_checkpoint, load_checkpoint
-from models.NKD_kenel_layer import NKD_kernel_layers_v1
+from NKD_kenel_layer import NKD_kernel_layers_v1, save_checkpoint, load_checkpoint
 from NKD_test import Test_denoisers
 
 # args.seed, args.in_folder, args.out_folder, 
@@ -21,16 +21,6 @@ def train(args, verbose = False):
     # Setup device
     
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    # if device.type == 'cuda':
-    #     free_device = None
-    #     for i in range(torch.cuda.device_count()):
-    #         if torch.cuda.memory_allocated(i) == 0:
-    #             free_device = i
-    #             break
-    #     if free_device is not None:
-    #         device = torch.device(f'cuda:{free_device}')
-    #     else:
-    #         print("No free GPU device found. Using default GPU.")
     if verbose:
         print(f"Using device: {device}")
 
@@ -149,7 +139,7 @@ def train(args, verbose = False):
 
                 # Save checkpoint
                 if is_best:
-                    save_checkpoint(args.out_folder, {
+                    model.save_checkpoint(args.out_folder, {
                         'step': total_steps,
                         'epoch': epoch,
                         'model_state_dict': model.state_dict(),
@@ -172,7 +162,7 @@ def train(args, verbose = False):
             if total_steps % args.save_freq == 0:
                 if verbose:
                     print('saving checkpoint')
-                save_checkpoint(args.out_folder, {
+                model.save_checkpoint(args.out_folder, {
                     'step': total_steps,
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
@@ -200,7 +190,7 @@ def train(args, verbose = False):
 
     except KeyboardInterrupt:
         print("\nTraining interrupted. Saving checkpoint...")
-        save_checkpoint(args.out_folder, {
+        model.save_checkpoint(args.out_folder, {
             'step': total_steps,
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
@@ -213,7 +203,7 @@ def train(args, verbose = False):
         print(f"Checkpoint saved to {args.out_folder}/model_interrupted.pth")
     except Exception as e:
         print(f"\nERROR: {str(e)}")
-        save_checkpoint(args.out_folder, {
+        model.save_checkpoint(args.out_folder, {
             'step': total_steps,
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
@@ -271,7 +261,7 @@ if __name__ == "__main__":
     args.color_mode = 'rgb'
     args.sigma_min = 30
     args.sigma_max = 30
-    args.patch_size = 32
+    args.patch_size = 16
     args.epochs = 6000
     args.batch_size = 16
     args.lr = 1e-4
@@ -292,7 +282,7 @@ if __name__ == "__main__":
     args.progress_freq = 1
 
     # MODEL PARAMETERS
-    args.architecture = NKD_kernel_layers_v1
+    # args.architecture = NKD_li
     args.patch_rad = 5
     args.window_rad = 10
     args.in_channel = 3

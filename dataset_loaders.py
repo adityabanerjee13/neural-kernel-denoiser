@@ -3,7 +3,7 @@ import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
-
+import matplotlib.pyplot as plt
 
 def augmentation(x, k=0, inverse=False):
     """Augment patch with rotation/flip"""
@@ -75,8 +75,182 @@ def load_images(path, color_mode='gray', subdirs=None):
         print(f"Total loaded {len(images)} images from: {path}")
     return images
 
+def display_tensor_image(tensor, title=None, figsize=(8, 8)):
+    """
+    Display a PyTorch tensor as an image.
+    
+    Args:
+        tensor (torch.Tensor): Image tensor of shape (C, H, W) or (B, C, H, W)
+        title (str, optional): Title for the plot
+        figsize (tuple, optional): Figure size (width, height)
+    """
+    if len(tensor.shape) == 4:
+        # If batch of images is provided, take the first one
+        tensor = tensor[0]
+    
+    # Move tensor to CPU if it's on GPU
+    if tensor.is_cuda:
+        tensor = tensor.cpu()
+    
+    # Convert to numpy array
+    img = tensor.detach().numpy()
+    
+    # Rearrange channels to (H, W, C) for plotting
+    if len(img.shape) == 3:
+        img = np.transpose(img, (1, 2, 0))
+    
+    # Normalize if needed (assuming the range is [0,1] or [-1,1])
+    if img.min() < 0:
+        img = (img + 1) / 2.0
+    if img.max() > 1:
+        img = img / 255.0
+        
+    # Clip values to [0,1] range
+    img = np.clip(img, 0, 1)
+    
+    # Handle different channel numbers
+    if img.shape[-1] == 1:  # Grayscale
+        plt.figure(figsize=figsize)
+        plt.imshow(img.squeeze(), cmap='gray')
+    elif img.shape[-1] == 3:  # RGB
+        plt.figure(figsize=figsize)
+        plt.imshow(img)
+    else:
+        raise ValueError(f"Unsupported number of channels: {img.shape[-1]}")
+    
+    if title:
+        plt.title(title)
+    plt.axis('off')
+    plt.show()
+
+class Train_img_Dataset(Dataset):
+    def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, 
+                 batch_size=128, req_patches=True, factor=None, no_patches=None):
+        """
+        Training dataset that matches demo_training.py implementation
+        Args:
+            in_folder (str): Input folder path
+            color_mode (str): 'gray' or 'rgb'
+            sigma_min (float): Min noise sigma (0-255)
+            sigma_max (float): Max noise sigma (0-255)
+
+            patch_size (int): Training patch size
+            batch_size (int): Batch size (used for __len__)
+            device: Device to put tensors on
+        """
+        super().__init__()
+
+        if req_patches:
+            if factor==None and no_patches==None:
+                raise ValueError("input one out of 'factor' or 'no_of_patches' values")
+            elif factor!=None and no_patches!=None:
+                raise ValueError("input one out of 'factor' or 'no_of_patches' values")
+            elif factor!=None:
+                self.factor=factor
+                self.no_patches= None
+            else:
+                self.no_patches= no_patches
+                self.factor= None
+
+        self.color_mode = color_mode
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+        self.patch_size = patch_size
+        self.batch_size = batch_size
+        self.req_patches = req_patches
+        # self.device = device
+
+        # Training subdirectories to search
+        # train_subdirs = ['img_barbara']
+        train_subdirs = ['img_house']
+
+        # Load all images
+        print("\nLoading training images...")
+        self.images_train = load_images(in_folder, color_mode, train_subdirs)
+
+        # Filter by size
+        valid_images = []
+        for img in self.images_train:
+            h, w = img.shape[:2]
+            if h >= patch_size and w >= patch_size:
+                valid_images.append(img)
+
+        self.images_train = valid_images
+        self.number_of_images = len(self.images_train)
+
+        if self.number_of_images == 0:
+            raise RuntimeError(f"No valid images found in {in_folder}")
+        print(f"Loaded {self.number_of_images} images for training")
+
+    def __len__(self):
+        return self.batch_size  # As in demo_training.py
+
+    def __getitem__(self, idx):
+        img = self.images_train[0]
+
+        # Convert to float
+        img = img.astype(np.float32) / 255.0
+
+        # Random sigma
+        sigma = np.random.uniform(
+            low=self.sigma_min/255, high=self.sigma_max/255)
+
+        # Get dimensions accounting for color mode
+        if self.color_mode == 'gray':
+            h, w = img.shape
+        else:
+            h, w, _ = img.shape
+
+        # Add noise
+        noise = np.random.normal(0, sigma, img.shape)
+        noisy_img = np.clip(img + noise, 0, 1)
+
+        # Convert to torch tensors
+        if self.color_mode == 'gray':
+            clean = torch.from_numpy(img).unsqueeze(0)
+            noisy = torch.from_numpy(noisy_img).unsqueeze(0)
+        else:
+            clean = torch.from_numpy(img.transpose(2, 0, 1))
+            noisy = torch.from_numpy(noisy_img.transpose(2, 0, 1))
+
+        if self.req_patches:
+            clean_patches = self._extract_random_patches(clean)
+            b, c, h, w = clean_patches.shape
+            clean = clean_patches[:,:,h//2,w//2]
+            noisy = clean_patches + float(sigma)*torch.randn_like(clean_patches)
+        else:
+            pass
+
+        sigma_torch = sigma * torch.ones(1, 1, 1)
+
+        return clean, noisy, sigma_torch
+
+    def _extract_random_patches(self, img):
+
+        patch_rad = self.patch_size//2
+        C, H, W = img.shape
+
+        # Total number of pixels and 30% selection
+        total_pixels = H * W
+        if self.factor != None:
+            num_points = int(self.factor * total_pixels)
+        else:
+            num_points = self.no_patches
+
+        # Randomly select points
+        y_coords = torch.randint(patch_rad, H - patch_rad, (num_points,))
+        x_coords = torch.randint(patch_rad, W - patch_rad, (num_points,))
+
+        # Extract patches
+        img_patches = []
+        for y, x in zip(y_coords, x_coords):
+            patch = img[:, y - patch_rad:y + patch_rad + 1, x - patch_rad:x + patch_rad + 1]
+            img_patches.append(patch)
+
+        return torch.stack(img_patches)
+
 class TrainingDataset(Dataset):
-    def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, batch_size=128):
+    def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, batch_size=128, req_patches=True):
         """
         Training dataset that matches demo_training.py implementation
         Args:
@@ -95,6 +269,7 @@ class TrainingDataset(Dataset):
         self.sigma_max = sigma_max
         self.patch_size = patch_size
         self.batch_size = batch_size
+        self.req_patches = req_patches
         # self.device = device
 
         # Training subdirectories to search
@@ -163,11 +338,17 @@ class TrainingDataset(Dataset):
         clean = augmentation(clean, k)
         noisy = augmentation(noisy, k)
 
+        if self.req_patches:
+            clean_patches = self._extract_random_patches(clean)
+            b, c, h, w = clean_patches.shape
+            clean = clean_patches[:,:,h//2,w//2]
+            noisy = clean_patches + float(sigma)*torch.randn_like(clean_patches)
+        else:
+            pass
         # Create sigma tensor
         sigma_torch = sigma * torch.ones(1, 1, 1)
 
         return clean, noisy, sigma_torch
-
 
 class ValidationDataset(Dataset):
     def __init__(self, val_dir, color_mode='gray', sigma=25):
@@ -262,55 +443,6 @@ def create_dataloaders(args):
         )
 
     return train_loader, val_loader
-
-# class TestDataset(Dataset):
-#     def __init__(self, test_dir, color_mode='gray', sigma=25):
-#         """
-#         Test dataset that processes full images
-#         Args:
-#             test_dir (str): Test directory path
-#             color_mode (str): 'gray' or 'rgb'
-#             sigma (float): Noise level (0-255)
-#         """
-#         super().__init__()
-
-#         self.color_mode = color_mode
-#         self.sigma = sigma / 255.0
-#         # self.device = device
-
-#         # Load all Test images
-#         self.images = load_images(test_dir, color_mode)
-#         if len(self.images) == 0:
-#             raise RuntimeError(f"No valid images found in {test_dir}")
-
-#         print(f"Loaded {len(self.images)} images for Test")
-
-#     def __len__(self):
-#         return len(self.images)  # Process all images
-
-#     def __getitem__(self, idx):
-#         img = self.images[idx]
-
-#         # Convert to float
-#         img = img.astype(np.float32) / 255.0
-
-#         # Add noise
-#         noise = np.random.normal(0, self.sigma, img.shape)
-#         noisy_img = np.clip(img + noise, 0, 1)
-
-#         # Convert to torch tensors
-#         if self.color_mode == 'gray':
-#             clean = torch.from_numpy(img).unsqueeze(0)
-#             noisy = torch.from_numpy(noisy_img).unsqueeze(0)
-#         else:
-#             clean = torch.from_numpy(img.transpose(2, 0, 1))
-#             noisy = torch.from_numpy(noisy_img.transpose(2, 0, 1))
-
-#         sigma_torch = self.sigma * torch.ones(1, 1, 1)
-
-#         return clean, noisy, sigma_torch
-
-
 
 class TestDataset(Dataset):
     def __init__(self, in_folder, color_mode='gray', sigma=15, show=False):

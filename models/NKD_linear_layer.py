@@ -310,7 +310,9 @@ class NKD_latent_layers(nn.Module):
         self.down3 = nn.Conv2d(latent_dim//4, latent_channel_dim*in_channel, kernel_size=1, stride=1, padding=0)
 
     def forward(self, inp, sig=None):
+        print('f',inp.shape)
         guide = self.get_features(inp, sig)
+        print('g',guide.shape)
         x = NLM(inp, guide, self.window_rad, self.sigma)
         return x
     
