@@ -3,7 +3,7 @@ import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
-import matplotlib.pyplot as plt
+from utils import *
 
 def augmentation(x, k=0, inverse=False):
     """Augment patch with rotation/flip"""
@@ -75,57 +75,9 @@ def load_images(path, color_mode='gray', subdirs=None):
         print(f"Total loaded {len(images)} images from: {path}")
     return images
 
-def display_tensor_image(tensor, title=None, figsize=(8, 8)):
-    """
-    Display a PyTorch tensor as an image.
-    
-    Args:
-        tensor (torch.Tensor): Image tensor of shape (C, H, W) or (B, C, H, W)
-        title (str, optional): Title for the plot
-        figsize (tuple, optional): Figure size (width, height)
-    """
-    if len(tensor.shape) == 4:
-        # If batch of images is provided, take the first one
-        tensor = tensor[0]
-    
-    # Move tensor to CPU if it's on GPU
-    if tensor.is_cuda:
-        tensor = tensor.cpu()
-    
-    # Convert to numpy array
-    img = tensor.detach().numpy()
-    
-    # Rearrange channels to (H, W, C) for plotting
-    if len(img.shape) == 3:
-        img = np.transpose(img, (1, 2, 0))
-    
-    # Normalize if needed (assuming the range is [0,1] or [-1,1])
-    if img.min() < 0:
-        img = (img + 1) / 2.0
-    if img.max() > 1:
-        img = img / 255.0
-        
-    # Clip values to [0,1] range
-    img = np.clip(img, 0, 1)
-    
-    # Handle different channel numbers
-    if img.shape[-1] == 1:  # Grayscale
-        plt.figure(figsize=figsize)
-        plt.imshow(img.squeeze(), cmap='gray')
-    elif img.shape[-1] == 3:  # RGB
-        plt.figure(figsize=figsize)
-        plt.imshow(img)
-    else:
-        raise ValueError(f"Unsupported number of channels: {img.shape[-1]}")
-    
-    if title:
-        plt.title(title)
-    plt.axis('off')
-    plt.show()
-
 class Train_img_Dataset(Dataset):
     def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, 
-                 batch_size=128, req_patches=True, factor=None, no_patches=None):
+                 imgs_per_epoch=128, req_patches=True, factor=None, no_patches=None):
         """
         Training dataset that matches demo_training.py implementation
         Args:
@@ -156,7 +108,7 @@ class Train_img_Dataset(Dataset):
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.patch_size = patch_size
-        self.batch_size = batch_size
+        self.imgs_per_epoch = imgs_per_epoch
         self.req_patches = req_patches
         # self.device = device
 
@@ -183,7 +135,7 @@ class Train_img_Dataset(Dataset):
         print(f"Loaded {self.number_of_images} images for training")
 
     def __len__(self):
-        return self.batch_size  # As in demo_training.py
+        return self.imgs_per_epoch  # As in demo_training.py
 
     def __getitem__(self, idx):
         img = self.images_train[0]
@@ -242,15 +194,12 @@ class Train_img_Dataset(Dataset):
         x_coords = torch.randint(patch_rad, W - patch_rad, (num_points,))
 
         # Extract patches
-        img_patches = []
-        for y, x in zip(y_coords, x_coords):
-            patch = img[:, y - patch_rad:y + patch_rad + 1, x - patch_rad:x + patch_rad + 1]
-            img_patches.append(patch)
+        img_patches = list_of_pixels2patches(img, y_coords, x_coords, patch_rad)
 
-        return torch.stack(img_patches)
+        return img_patches
 
 class TrainingDataset(Dataset):
-    def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, batch_size=128, req_patches=True):
+    def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, imgs_per_epoch=128, req_patches=True):
         """
         Training dataset that matches demo_training.py implementation
         Args:
@@ -259,7 +208,7 @@ class TrainingDataset(Dataset):
             sigma_min (float): Min noise sigma (0-255)
             sigma_max (float): Max noise sigma (0-255)
             patch_size (int): Training patch size
-            batch_size (int): Batch size (used for __len__)
+            imgs_per_epoch (int): Batch size (used for __len__)
             device: Device to put tensors on
         """
         super().__init__()
@@ -268,7 +217,7 @@ class TrainingDataset(Dataset):
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.patch_size = patch_size
-        self.batch_size = batch_size
+        self.imgs_per_epoch = imgs_per_epoch
         self.req_patches = req_patches
         # self.device = device
 
@@ -295,7 +244,7 @@ class TrainingDataset(Dataset):
         print(f"Loaded {self.number_of_images} images for training")
 
     def __len__(self):
-        return self.batch_size  # As in demo_training.py
+        return self.imgs_per_epoch  # As in demo_training.py
 
     def __getitem__(self, idx):
         # Random sigma
@@ -311,32 +260,18 @@ class TrainingDataset(Dataset):
         else:
             h, w, _ = img.shape
 
-        # Random patch (match demo_training's -1)
-        i = np.random.choice(h - self.patch_size - 1)
-        j = np.random.choice(w - self.patch_size - 1)
-
         # Extract patch based on color mode
-        if self.color_mode == 'gray':
-            patch = img[i:i+self.patch_size, j:j+self.patch_size]
-        else:
-            patch = img[i:i+self.patch_size, j:j+self.patch_size, :]
-
-        # Convert to float and add noise
-        patch = patch.astype(np.float32) / 255.0
-        patch_noisy = patch + sigma * np.random.randn(*patch.shape)
+        img = img.astype(np.float32) / 255.0
 
         # Convert to torch tensors with proper shape
         if self.color_mode == 'gray':
-            clean = torch.from_numpy(patch).unsqueeze(0)
-            noisy = torch.from_numpy(patch_noisy).unsqueeze(0)
+            clean = torch.from_numpy(img).unsqueeze(0)
         else:
-            clean = torch.from_numpy(patch.transpose(2, 0, 1))
-            noisy = torch.from_numpy(patch_noisy.transpose(2, 0, 1))
+            clean = torch.from_numpy(img.transpose(2, 0, 1))
 
         # Random augmentation
         k = np.random.randint(8)
         clean = augmentation(clean, k)
-        noisy = augmentation(noisy, k)
 
         if self.req_patches:
             clean_patches = self._extract_random_patches(clean)
@@ -344,7 +279,11 @@ class TrainingDataset(Dataset):
             clean = clean_patches[:,:,h//2,w//2]
             noisy = clean_patches + float(sigma)*torch.randn_like(clean_patches)
         else:
-            pass
+            i = torch.randint(0, h - self.patch_size - 1)
+            j = torch.randint(0, w - self.patch_size - 1)
+            clean = clean[:, i:i+self.patch_size, j:j+self.patch_size]
+            noisy = clean + float(sigma)*torch.randn_like(clean)   
+
         # Create sigma tensor
         sigma_torch = sigma * torch.ones(1, 1, 1)
 
@@ -454,14 +393,14 @@ class TestDataset(Dataset):
             sigma_min (float): Min noise sigma (0-255)
             sigma_max (float): Max noise sigma (0-255)
             patch_size (int): testing patch size
-            batch_size (int): Batch size (used for __len__)
+            imgs_per_epoch (int): Batch size (used for __len__)
             device: Device to put tensors on
         """
         super().__init__()
 
         self.color_mode = color_mode
         self.sigma = sigma/255.0
-        # self.batch_size = batch_size
+        # self.imgs_per_epoch = imgs_per_epoch
         # self.device = device
 
         # testing subdirectories to search

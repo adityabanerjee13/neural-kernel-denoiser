@@ -6,6 +6,24 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 import matplotlib.pyplot as plt
 
 
+def extract_all_patches(img, patch_rad):
+    # patch_rad = patch_size//2
+    C, H, W = img.shape
+    # Randomly select points
+    y_coords = torch.arange(patch_rad, H - patch_rad, 1)
+    x_coords = torch.arange(patch_rad, W - patch_rad, 1)
+    # Extract patches
+    img_patches = list_of_pixels2patches(img, y_coords, x_coords, patch_rad)
+    return img_patches
+
+def list_of_pixels2patches(img, y_coords, x_coords, patch_rad):
+    # Extract patches
+    img_patches = []
+    for y, x in zip(y_coords, x_coords):
+        patch = img[:, y - patch_rad:y + patch_rad + 1, x - patch_rad:x + patch_rad + 1]
+        img_patches.append(patch)
+    return torch.stack(img_patches)
+
 def load_checkpoint(checkpoint_path, architecture, device, optimizer=None, scheduler=None):
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found at '{checkpoint_path}'")
@@ -61,40 +79,62 @@ def save_checkpoint(out_folder, state, step, is_best=False, _state=None):
     torch.save(state, checkpoint_path)
 
 def calculate_psnr(batch1, batch2):
-    batch1_np = batch1.permute(0, 2, 3, 1).detach().cpu().numpy()  
-    batch2_np = batch2.permute(0, 2, 3, 1).detach().cpu().numpy()  
-
-    # Compute PSNR for each image in the batch
     psnr_scores = []
-    for i in range(batch1_np.shape[0]):  # Loop over the batch
-        img1 = batch1_np[i]
-        img2 = batch2_np[i]
+    if len(batch1.shape)==4 and len(batch2.shape)==4:
+        batch1_np = batch1.permute(0, 2, 3, 1).detach().cpu().numpy()  
+        batch2_np = batch2.permute(0, 2, 3, 1).detach().cpu().numpy()  
 
-        # Compute PSNR for each channel and average the scores
-        psnr_val = psnr(img1, img2, data_range=1)
+        # Compute PSNR for each image in the batch
+        for i in range(batch1_np.shape[0]):  # Loop over the batch
+            img1 = batch1_np[i]
+            img2 = batch2_np[i]
+
+            # Compute PSNR for each channel and average the scores
+            psnr_val = psnr(img1, img2, data_range=1)
+            psnr_scores.append(psnr_val)
+
+    elif len(batch1.shape)==3 and len(batch2.shape)==3:
+        batch1_np = batch1.permute(1, 2, 0).detach().cpu().numpy()  
+        batch2_np = batch2.permute(1, 2, 0).detach().cpu().numpy()  
+        psnr_val = psnr(batch1_np, batch2_np, data_range=1)
         psnr_scores.append(psnr_val)
+    
+    else:
+        raise ValueError(f'error in shape of input 1:{batch1.shape}, 2:{batch2.shape}')
 
     # Return mean PSNR scores.
     return np.mean(psnr_scores)
 
-def calculate_ssim(batch1, batch2):
-    channels = batch1.size(1)
-    batch1_np = batch1.permute(0, 2, 3, 1).detach().cpu().numpy()  
-    batch2_np = batch2.permute(0, 2, 3, 1).detach().cpu().numpy()  
+def img_ssim(img1, img2, channels):
+    # Compute SSIM for each channel and average the scores
+    per_channel_ssim = [
+        ssim(img1[:, :, c], img2[:, :, c], data_range=img2[:, :, c].max() - img2[:, :, c].min())
+        for c in range(channels)
+    ]
+    return np.mean(per_channel_ssim)  # Average across channels
 
-    # Compute SSIM for each image in the batch
+def calculate_ssim(batch1, batch2):
+    
     ssim_scores = []
-    for i in range(batch1_np.shape[0]):  # Loop over the batch
-        img1 = batch1_np[i]
-        img2 = batch2_np[i]
-        
-        # Compute SSIM for each channel and average the scores
-        per_channel_ssim = [
-            ssim(img1[:, :, c], img2[:, :, c], data_range=img2[:, :, c].max() - img2[:, :, c].min())
-            for c in range(channels)
-        ]
-        mean_ssim = np.mean(per_channel_ssim)  # Average across channels
+    if len(batch1.shape)==4 and len(batch1.shape)==4:
+        channels = batch1.size(1)
+        batch1_np = batch1.permute(0, 2, 3, 1).detach().cpu().numpy()  
+        batch2_np = batch2.permute(0, 2, 3, 1).detach().cpu().numpy()  
+
+        # Compute SSIM for each image in the batch
+        for i in range(batch1_np.shape[0]):  # Loop over the batch
+            img1 = batch1_np[i]
+            img2 = batch2_np[i]
+            mean_ssim = img_ssim(img1, img2, channels)
+            ssim_scores.append(mean_ssim)
+    elif len(batch1.shape)==3 and len(batch1.shape)==3:
+        channels = batch1.size(0)
+        batch1_np = batch1.permute(1, 2, 0).detach().cpu().numpy()  
+        batch2_np = batch2.permute(1, 2, 0).detach().cpu().numpy() 
+        mean_ssim = img_ssim(batch1_np, batch2_np, channels)
         ssim_scores.append(mean_ssim)
+    else:
+        raise ValueError(f'error in shape of input 1:{batch1.shape}, 2:{batch2.shape}')
 
     # Return mean SSIM scores.
     return np.mean(ssim_scores)

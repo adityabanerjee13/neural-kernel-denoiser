@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 # from models.NKD_linear_layer import calculate_psnr, calculate_ssim, NKD_latent_layers, load_checkpoint
 from NKD_kenel_layer import calculate_psnr, calculate_ssim, load_checkpoint
-from denoisers.NLM_torch import NLM_tensor
+# from denoisers.NLM_torch import NLM_tensor
 from utils import show_tensor_image
 from dataset_loaders import TestDataset, DataLoader
 class config:
@@ -111,15 +111,15 @@ def main(color_mode='rgb'):
     denoiser_nkd, _, _, _ = load_checkpoint('./output_510351210115_15/model_510351210115_15_step_9500.pth', device)
     denoiser_nkd.window_rad = 7
 
-    denoiser_nlm = lambda x, y : NLM_tensor(x, x, 1, 5, 5/255, False)
+    # denoiser_nlm = lambda x, y : NLM_tensor(x, x, 1, 5, 5/255, False)
     denoiser_bm3d = BM3D()
     from PnP.regularizer import TV_regularizer
     denoiser_TV = TV_regularizer(lamda=0.025, iters=50, l=0, u=1, proj_p='isotropic')
 
     # denoisers = [denoiser_nkd.dsg_output, denoiser_nkd]
     # names = ['DSG-NKD', 'NKD']
-    denoisers=[denoiser_nkd, denoiser_nlm, denoiser_bm3d, denoiser_TV]
-    names=['NKD','NLM', 'BM3D', 'TV']
+    # denoisers=[denoiser_nkd, denoiser_nlm, denoiser_bm3d, denoiser_TV]
+    # names=['NKD','NLM', 'BM3D', 'TV']
     denoisers=[denoiser_TV]
     names=['TV']
 
