@@ -24,7 +24,7 @@ class TV:
         # print(x.shape)
         if len(x.shape) != 3:
             outdim=4
-            x = x.squeeze()
+            x = x.squeeze(0)
             assert len(x.shape) == 3, "Input image must have shape (C, M, N)"
 
         c, m, n = x.shape

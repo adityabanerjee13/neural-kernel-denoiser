@@ -55,7 +55,7 @@ def img2Dshift(v, dx, dy):
             t[:,:,:,:row - dx, -dy:] = v[:,:,:,dx:, :col + dy]
         elif typ == 3:  # dx > 0, dy > 0
             t[:,:,:,:row - dx, :col - dy] = v[:,:,:,dx:, dy:]
-    else:
+    elif len(v.shape) == 3:
         batch, row, col = v.shape
         t = torch.zeros((batch, row, col), device=v.device, dtype=v.dtype)
 
@@ -189,6 +189,13 @@ def NLM_tensor(input_image,guide_image,patch_rad,window_rad,sigma, return_D_matr
     input_image = input_image.to(torch.float32)
     guide_image = guide_image.to(torch.float32)
 
+    if len(input_image.shape)==3:
+        b = False
+        input_image = input_image.unsqueeze(0)
+        guide_image = guide_image.unsqueeze(0)
+    else:
+        b = True
+
     _, channel,height,width = input_image.shape
 
     U = torch.zeros((channel, height, width), dtype=torch.float32, device=input_image.device)  # To hold denoised image
@@ -217,6 +224,8 @@ def NLM_tensor(input_image,guide_image,patch_rad,window_rad,sigma, return_D_matr
             Z = Z + w
 
     U = U/Z
+    if not b:
+        U = U.squeeze(0)
     if return_D_matrix:
         return U , Z    # U = Denoised image, Z = Normalization coefficients
     return U.to(torch.float32)        # U = Denoised image

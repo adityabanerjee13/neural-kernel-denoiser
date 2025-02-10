@@ -14,7 +14,7 @@ def augmentation(x, k=0, inverse=False):
         x = torch.flip(x, dims=[2])
     return torch.rot90(x, k=(k//2) % 4, dims=[1, 2])
 
-def load_images(path, color_mode='gray', subdirs=None):
+def load_images(path, color_mode='gray', subdirs=None, size=None):
     """
     Generic function to load images from directory/subdirectories
     Args:
@@ -42,12 +42,16 @@ def load_images(path, color_mode='gray', subdirs=None):
                 try:
                     filepath = os.path.join(root, f)
                     if color_mode == 'gray':
-                        img = np.array(ImageOps.grayscale(Image.open(filepath)))
+                        img = (ImageOps.grayscale(Image.open(filepath)))
                     else:  # rgb
-                        img = np.array(Image.open(filepath).convert('RGB'))
-                        if len(img.shape) != 3 or img.shape[2] != 3:
-                            print(f"Skipping {f}: Invalid RGB shape {img.shape}")
-                            continue
+                        img = (Image.open(filepath).convert('RGB'))
+                        # if len(img.shape) != 3 or img.shape[2] != 3:
+                        #     print(f"Skipping {f}: Invalid RGB shape {img.shape}")
+                        #     continue
+                    if size:
+                        img = np.array(img.resize((size, size)))
+                    else:
+                        img = np.array(img)
                     local_images.append(img.astype(np.uint8))
                 except Exception as e:
                     print(f"Could not load {f}: {e}")
@@ -77,7 +81,8 @@ def load_images(path, color_mode='gray', subdirs=None):
 
 class Train_img_Dataset(Dataset):
     def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, 
-                 imgs_per_epoch=128, req_patches=True, factor=None, no_patches=None):
+                 imgs_per_epoch=128, req_patches=True, factor=None, size=None,
+                 no_patches=None, train_subdirs = ['img_barbara']):
         """
         Training dataset that matches demo_training.py implementation
         Args:
@@ -113,20 +118,22 @@ class Train_img_Dataset(Dataset):
         # self.device = device
 
         # Training subdirectories to search
-        # train_subdirs = ['img_barbara']
-        train_subdirs = ['img_house']
 
         # Load all images
         print("\nLoading training images...")
-        self.images_train = load_images(in_folder, color_mode, train_subdirs)
+        self.images_train = load_images(in_folder, color_mode, train_subdirs, size=size)
 
         # Filter by size
         valid_images = []
-        for img in self.images_train:
-            h, w = img.shape[:2]
-            if h >= patch_size and w >= patch_size:
+        if type(patch_size) == int:
+            for img in self.images_train:
+                h, w = img.shape[:2]
+                if h >= patch_size and w >= patch_size:
+                    valid_images.append(img)
+        else:
+            for img in self.images_train:
                 valid_images.append(img)
-
+            
         self.images_train = valid_images
         self.number_of_images = len(self.images_train)
 
@@ -170,8 +177,11 @@ class Train_img_Dataset(Dataset):
             b, c, h, w = clean_patches.shape
             clean = clean_patches[:,:,h//2,w//2]
             noisy = clean_patches + float(sigma)*torch.randn_like(clean_patches)
-        else:
-            pass
+        # else:
+        #     i = np.random.randint(0, h - self.patch_size - 1)
+        #     j = np.random.randint(w - self.patch_size - 1)
+        #     clean = clean[:, i:i+self.patch_size, j:j+self.patch_size]
+        #     noisy = clean + float(sigma)*torch.randn_like(clean)   
 
         sigma_torch = sigma * torch.ones(1, 1, 1)
 
@@ -196,10 +206,10 @@ class Train_img_Dataset(Dataset):
         # Extract patches
         img_patches = list_of_pixels2patches(img, y_coords, x_coords, patch_rad)
 
-        return img_patches
+        return torch.stack(img_patches)
 
 class TrainingDataset(Dataset):
-    def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, imgs_per_epoch=128, req_patches=True):
+    def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, imgs_per_epoch=128, req_patches=True, no_patches = 128):
         """
         Training dataset that matches demo_training.py implementation
         Args:
@@ -213,6 +223,8 @@ class TrainingDataset(Dataset):
         """
         super().__init__()
 
+        self.factor = None
+        self.no_patches = no_patches
         self.color_mode = color_mode
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
@@ -223,7 +235,7 @@ class TrainingDataset(Dataset):
 
         # Training subdirectories to search
         train_subdirs = ['BSD400']
-        # train_subdirs = ['BSD400', 'DIV2K', 'Flickr2K', 'waterloo_exploration']
+        train_subdirs = ['BSD400', 'DIV2K', 'Flickr2K', 'waterloo_exploration']
 
         # Load all images
         print("\nLoading training images...")
@@ -288,6 +300,27 @@ class TrainingDataset(Dataset):
         sigma_torch = sigma * torch.ones(1, 1, 1)
 
         return clean, noisy, sigma_torch
+
+    def _extract_random_patches(self, img):
+
+        patch_rad = self.patch_size//2
+        C, H, W = img.shape
+
+        # Total number of pixels and 30% selection
+        total_pixels = H * W
+        if self.factor != None:
+            num_points = int(self.factor * total_pixels)
+        else:
+            num_points = self.no_patches
+
+        # Randomly select points
+        y_coords = torch.randint(patch_rad, H - patch_rad, (num_points,))
+        x_coords = torch.randint(patch_rad, W - patch_rad, (num_points,))
+
+        # Extract patches
+        img_patches = list_of_pixels2patches(img, y_coords, x_coords, patch_rad)
+
+        return torch.stack(img_patches)
 
 class ValidationDataset(Dataset):
     def __init__(self, val_dir, color_mode='gray', sigma=25):

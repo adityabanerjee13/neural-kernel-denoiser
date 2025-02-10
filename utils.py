@@ -1,10 +1,66 @@
 import numpy as np
 import os
+import math
 import torch
+import torch.nn as nn
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
 import matplotlib.pyplot as plt
 
+
+
+def linear_img_fwd(img, parameters: nn.Linear):
+    out_channel, in_channel = parameters.weight.shape
+    parameters_linear = (parameters.weight).reshape(out_channel,in_channel, 1, 1)
+    parameters_bias = parameters.bias
+    return torch.functional.F.conv2d(
+        img,parameters_linear,
+        bias=parameters_bias,
+    )
+
+def norm_img_fwd(img, parameters: nn.LayerNorm):
+    parameters_linear = parameters.weight
+    parameters_bias = parameters.bias
+    c, h, w = img.shape[-3:]
+    inp = img2channel_list(img)
+    out = torch.functional.F.layer_norm(inp,(c,),parameters_linear,bias=parameters_bias)
+    return channel_list2img(out, h, w)
+
+def blk_img_fwd(x, blk):
+    for i in blk:
+        if isinstance(i, nn.Linear):
+            x = linear_img_fwd(x, i)
+        elif isinstance(i, nn.LayerNorm):
+            x = norm_img_fwd(x, i)
+        elif isinstance(i, nn.Sequential):
+            x = blk_img_fwd(x, i)
+        else:
+            x = i(x)
+    return x
+
+def unpad(img, hp, wp):
+    if len(img.shape)==3:
+        return img[:, hp:-hp, wp:-wp]
+    elif len(img.shape)==4:
+        return img[:, :, hp:-hp, wp:-wp]
+    else:
+        raise ValueError(f'image shape {img.shape} is invalid')
+
+def img2channel_list(img):
+    if len(img.shape)==3:
+        c, h, w = img.shape
+        return img.permute(1,2,0).reshape(-1,c)
+    elif len(img.shape)==4:
+        b, c, _, _ = img.shape
+        return img.permute(0,2,3,1).reshape(b, -1, c)
+    
+def channel_list2img(channel_list, h, w):
+    if len(channel_list.shape)==2:
+        n, c = channel_list.shape
+        return channel_list.reshape(h, w ,c).permute(2,0,1)
+    elif len(channel_list.shape)==3:
+        b, n, c = channel_list.shape
+        return channel_list.reshape(b, h, w ,c).permute(0,3,1,2)
 
 def extract_all_patches(img, patch_rad):
     # patch_rad = patch_size//2
@@ -13,8 +69,10 @@ def extract_all_patches(img, patch_rad):
     y_coords = torch.arange(patch_rad, H - patch_rad, 1)
     x_coords = torch.arange(patch_rad, W - patch_rad, 1)
     # Extract patches
-    img_patches = list_of_pixels2patches(img, y_coords, x_coords, patch_rad)
-    return img_patches
+    img_patches=[]
+    for i in y_coords:
+        img_patches += list_of_pixels2patches(img, torch.full_like(x_coords, i), x_coords, patch_rad)
+    return torch.stack(img_patches)
 
 def list_of_pixels2patches(img, y_coords, x_coords, patch_rad):
     # Extract patches
@@ -22,7 +80,7 @@ def list_of_pixels2patches(img, y_coords, x_coords, patch_rad):
     for y, x in zip(y_coords, x_coords):
         patch = img[:, y - patch_rad:y + patch_rad + 1, x - patch_rad:x + patch_rad + 1]
         img_patches.append(patch)
-    return torch.stack(img_patches)
+    return img_patches
 
 def load_checkpoint(checkpoint_path, architecture, device, optimizer=None, scheduler=None):
     if not os.path.exists(checkpoint_path):
@@ -139,7 +197,7 @@ def calculate_ssim(batch1, batch2):
     # Return mean SSIM scores.
     return np.mean(ssim_scores)
 
-def show_tensor_image(image_tensors : list, grid : tuple, titles=None, save=False, save_path=None):
+def show_tensor_image(image_tensors : list, grid : tuple, titles=None, save=False, save_path=None, vmin=0, vmax=1):
     x, y = grid
     _, axs = plt.subplots(x, y, figsize=(5*y, 5*x))
     # Convert tensors to numpy arrays for plotting
@@ -155,31 +213,35 @@ def show_tensor_image(image_tensors : list, grid : tuple, titles=None, save=Fals
             index = i*y + j
             if index >= len(image_tensors):
                 break
-            np_image = image_tensors[index].squeeze(0).detach().cpu().numpy().transpose(1, 2, 0)
+            np_image = image_tensors[index].detach().cpu().numpy()
+            if len(np_image.shape)==4:
+                np_image = np_image.squeeze(0).transpose(1, 2, 0)
+            else:
+                np_image = np_image.transpose(1, 2, 0)
             if y>1 and x>1:
-                axs[i,j].imshow(np_image, cmap='gray')
+                axs[i,j].imshow(np_image, cmap='gray', vmin=vmin, vmax=vmax)
                 if titles:
                     axs[i,j].set_title(titles[index])
                 axs[i,j].axis('off')
 
             elif y>1:
-                axs[j].imshow(np_image, cmap='gray')
+                axs[j].imshow(np_image, cmap='gray', vmin=vmin, vmax=vmax)
                 if titles:
                     axs[j].set_title(titles[index])
                 axs[j].axis('off')
 
             elif x>1:
-                axs[i].imshow(np_image, cmap='gray')
+                axs[i].imshow(np_image, cmap='gray', vmin=vmin, vmax=vmax)
                 if titles:
                     axs[i].set_title(titles[index])
                 axs[i].axis('off')
             else:
-                plt.imshow(np_image, cmap='gray')
+                plt.imshow(np_image, cmap='gray', vmin=vmin, vmax=vmax)
                 if titles:
                     plt.set_title(titles[index])
                 plt.axis('off')
 
-    plt.tight_layout()
+    # plt.tight_layout()
     if save: plt.savefig(save_path)
     else: plt.show()
     plt.close()
