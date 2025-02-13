@@ -440,7 +440,7 @@ class TestDataset(Dataset):
         if show:
             test_subdirs = ['curr_test']
         else:
-            test_subdirs = [d for d in os.listdir('./data/test') if os.path.isdir(os.path.join('./data/test', d))]
+            test_subdirs = [d for d in os.listdir('./data/test_set') if os.path.isdir(os.path.join('./data/test_set', d))]
         # Load all images
         print("\nLoading testing images...")
         self.images_test = load_images(in_folder, color_mode, test_subdirs)

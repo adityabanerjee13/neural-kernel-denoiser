@@ -37,7 +37,7 @@ class NKD_denoisers(nn.Module):
         return torch.functional.F.conv2d(inp, t)
 
     # Defined in child class
-    def _process_input(self):
+    def _pre_process_input(self):
         # to be defined in the child class
         pass
 
@@ -64,20 +64,21 @@ class NKD_denoisers(nn.Module):
 
         # Extract guide weights
         # print("guide",guide.shape)
-        guide = self._process_input(guide)
+        guide = self._pre_process_input(guide)
         # print("guide",guide.shape)
-        guide_weights = self._get_activation(guide)
+        guide = self._get_activation(guide)
         # print("guide_weights",guide_weights)
-        normalizing_factor = torch.sum(guide_weights, dim=1)
+        normalizing_factor = torch.sum(guide, dim=1)
         # print("normalizing_factor",normalizing_factor)
 
         inp = img2channel_list(unpad(inp, self.patch_rad, self.patch_rad))
         # print("inp",inp)
-        out = torch.sum((inp*guide_weights), dim=1)/normalizing_factor
+        out = torch.sum((inp*guide), dim=1)/normalizing_factor
         # print("out",out)
         return out.reshape(b, self.in_channel)
 
-    def forward_img(self, img, sig=None):
+    def forward_img(self, img, sig=None, span=32):
+        self.eval()
         # Extract patches from image window
         p = self.window_rad+self.patch_rad
         
@@ -86,22 +87,23 @@ class NKD_denoisers(nn.Module):
             if len(img.shape) == 4:
                 raise NotImplementedError('forward_img is not implemented for batches')
             else:
-                return self.forward_img(img).unsqueeze(0)
+                return self.forward_img(img, span=span).unsqueeze(0)
         elif len(img.shape) == 3:
             # print(img.shape)
             output = unpad(torch.zeros_like(img), p, p)
             # print(output.shape)
             c, h, w = img.shape
-            for j in range(p, w-p, 32):
-                for i in range(p, h-p, 32):
-                    _, h_o, w_o = output[:, i-p:i-p+32, j-p:j-p+32].shape
-                    i_str, i_stp = i-p, i+32+p
-                    j_str, j_stp = j-p, j+32+p
+            for j in range(p, w-p, span):
+                for i in range(p, h-p, span):
+                    _, h_o, w_o = output[:, i-p:i-p+span, j-p:j-p+span].shape
+                    i_str, i_stp = i-p, i+span+p
+                    j_str, j_stp = j-p, j+span+p
                     img_patches = extract_all_patches(img[:, i_str:i_stp, j_str:j_stp], (self.window_rad+self.patch_rad))
                     # print(img_patches.shape, img[:, i_str:i_stp, j_str:j_stp].shape)
-                    out_channel_list = self(img_patches, sig=None)
-                    # print(out_channel_list.shape, i, j, output[:, i-p:i-p+32, j-p:j-p+32].shape, channel_list2img(out_channel_list, h_o, w_o).shape)
-                    output[:, i-p:i-p+32, j-p:j-p+32] = channel_list2img(out_channel_list, h_o, w_o)
+                    with torch.no_grad():
+                        out_channel_list = self(img_patches, sig=None)
+                    # print(out_channel_list.shape, i, j, output[:, i-p:i-p+span, j-p:j-p+span].shape, channel_list2img(out_channel_list, h_o, w_o).shape)
+                    output[:, i-p:i-p+span, j-p:j-p+span] = channel_list2img(out_channel_list, h_o, w_o)
         return output
 
     def train_step(self, train_loader, criterion, optimizer, lamda = 1e-3):
@@ -235,9 +237,9 @@ class NKD_concat_kernel_learn(NKD_denoisers):
         self.in_layer = nn.Linear(in_features=in_dim,out_features=args.latent_dim)
         self.in_residual = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(in_features=args.latent_dim,out_features=args.latent_dim*2),
+                nn.Linear(in_features=args.latent_dim,out_features=args.latent_dim*4),
                 nn.LeakyReLU(),
-                nn.Linear(in_features=args.latent_dim*2,out_features=args.latent_dim),
+                nn.Linear(in_features=args.latent_dim*4,out_features=args.latent_dim),
             )
             for _ in range(args.residual_depth)
         ])
@@ -281,7 +283,7 @@ class NKD_concat_kernel_learn(NKD_denoisers):
         # print('x1', x1)
         return torch.exp((x1+x2)/(-2*self.sigma))
 
-    def _process_input(self, inp):
+    def _pre_process_input(self, inp):
         # print("inp",inp.shape)
         x = self._extract_patch_vector(inp)
         # print("x",x.shape)
@@ -349,9 +351,9 @@ class NKD_concat_kernel_learn_v2(NKD_denoisers):
 
         self.in_residual = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(in_features=args.latent_dim,out_features=args.latent_dim*2),
+                nn.Linear(in_features=args.latent_dim,out_features=args.latent_dim*4),
                 nn.LeakyReLU(),
-                nn.Linear(in_features=args.latent_dim*2,out_features=args.latent_dim),
+                nn.Linear(in_features=args.latent_dim*4,out_features=args.latent_dim),
             )
             for _ in range(args.residual_depth)
         ])
@@ -412,7 +414,7 @@ class NKD_concat_kernel_learn_v2(NKD_denoisers):
         # print('x1', x1)
         return torch.exp((x1+x2)/(-2*self.sigma))
 
-    def _process_input(self, inp):
+    def _pre_process_input(self, inp):
         # print("inp",inp.shape)
         x = self._extract_patch_vector(inp)
         # print("x",x.shape)
@@ -425,6 +427,113 @@ class NKD_concat_kernel_learn_v2(NKD_denoisers):
 
     def __str__(self):
         return '_concat_kl_v2'+f'_{self.patch_rad}{self.window_rad}{self.in_channel}{self.latent_dim}_{self.residual_depth}{self.proj_depth}_{int(self.blind)}'
+
+class NKD_concat_kernel_learn_v3(NKD_denoisers):
+    def __init__(self, args, device): 
+        super().__init__()
+        self.device = device
+        self.residual_depth = args.residual_depth
+        self.proj_depth = args.proj_depth
+        self.sigma = 1
+        self.blind = args.blind
+        self.latent_dim = args.latent_dim
+        self.patch_rad = args.patch_rad
+        patch_size = args.patch_rad * 2 + 1
+
+        self.window_rad = args.window_rad
+        self.in_channel = args.in_channel
+        self.proj_res_flag = args.proj_res_flag
+
+        if args.blind:
+            in_dim=args.in_channel*patch_size*patch_size
+        else:
+            in_dim=(args.in_channel+1)*patch_size*patch_size
+            
+        self.in_layer = nn.Linear(in_features=in_dim,out_features=args.latent_dim)
+
+        self.in_residual = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(in_features=args.latent_dim,out_features=args.latent_dim*4),
+                nn.LeakyReLU(),
+                nn.Linear(in_features=args.latent_dim*4,out_features=args.latent_dim),
+            )
+            for _ in range(args.residual_depth)
+        ])
+        self.in_norm = nn.ModuleList([
+            nn.LayerNorm(args.latent_dim)
+            for _ in range(args.residual_depth)
+        ])
+
+        # if args.pre_res:
+        self.proj = nn.ModuleList([])
+        for i in range(args.proj_depth):
+            in_dim = args.latent_dim//(2**i) if i!=0 else 2*args.latent_dim//(2**i)
+            self.proj.append(
+                nn.Sequential(
+                    nn.Linear(in_features=in_dim,out_features=args.latent_dim//(2**(i+1))),
+                    nn.LayerNorm(args.latent_dim//(2**(i+1))),
+                    nn.LeakyReLU(),
+                )
+            )
+        if self.proj_res_flag:
+            self.proj_residual = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(in_features=(args.latent_dim//(2**(i+1))),out_features=(args.latent_dim//(2**(i+1)))*4),
+                    nn.LeakyReLU(),
+                    nn.Linear(in_features=(args.latent_dim//(2**(i+1)))*4,out_features=(args.latent_dim//(2**(i+1)))),
+                )
+                for i in range(args.proj_depth)
+            ])
+            self.proj_norm = nn.ModuleList([
+                nn.LayerNorm(args.latent_dim//(2**(i+1)))
+                for i in range(args.proj_depth)
+            ])
+        self.out = nn.Linear(in_features=args.latent_dim//(2**(args.proj_depth)),out_features=args.in_channel)
+
+    def _concat_patch_central_pixel(self, inp):
+        central_pixel = inp[:,inp.size(1)//2,:][:,None,:].expand_as(inp)
+        return (torch.cat((inp,central_pixel), dim=-1), 
+                torch.cat((central_pixel,inp), dim=-1))
+
+    def _get_pre_activation(self, x):
+        # print('xa', x.shape)
+        x = self.in_layer(x)
+        # print('xb', x.shape)
+        for i in range(self.residual_depth):
+            x = x + self.in_residual[i](x)
+            x = self.in_norm[i](x)
+            # print('xc', x)
+        return x
+
+    def _get_activation(self, x):
+        x = self._concat_patch_central_pixel(x)
+        x = torch.cat(x, dim=1)
+
+        for i in range(self.proj_depth):
+            x = self.proj[i](x)
+            if self.proj_res_flag:
+                x = x + self.proj_residual[i](x)
+                x = self.proj_norm[i](x)
+            # print('xc', x)
+
+        # print('xd', x.shape)
+        x = self.out(x)
+        # print('xe', x)
+        x1,x2 = torch.chunk(x, chunks=2, dim=1)
+        # print('x1', x1)
+        return torch.exp((x1+x2)/(-2*self.sigma))
+
+    def _pre_process_input(self, inp):
+        # print("inp", inp, inp.shape)
+        x = self._extract_patch_vector(inp)
+        # print("x", x, x.shape)
+        x = img2channel_list(x)
+        # print("x", x, x.shape)
+        inp = self._get_pre_activation(x)
+        return inp
+
+    def __str__(self):
+        return '_concat_kl_v3'+f'_{self.patch_rad}{self.window_rad}{self.in_channel}{self.latent_dim}_{self.residual_depth}{self.proj_depth}_{int(self.blind)}'
 
 class NKD_diff_kernel_learn(NKD_denoisers):
     def __init__(self, args, device): 
@@ -504,7 +613,7 @@ class NKD_diff_kernel_learn(NKD_denoisers):
         x4 = linear_img_fwd(x3, self.out)
         return torch.exp(x4/(-2))
 
-    def _process_input(self, inp):
+    def _pre_process_input(self, inp):
         # print('inp', inp)
         x = self._extract_patch_vector(inp)
         # print('x', x)
@@ -615,7 +724,7 @@ class NKD_rbf_feat_learn(NKD_denoisers):
         # print('out', out.shape)
         return torch.exp((out)/(-2))
 
-    def _process_input(self, inp):
+    def _pre_process_input(self, inp):
         # print('process_inp: o-_extract_patch_vector>',x)
         x = self._extract_patch_vector(inp)
         # print('process_inp: _extract_patch_vector output>',x)
@@ -629,6 +738,7 @@ class NKD_rbf_feat_learn(NKD_denoisers):
 architectures = {
     'NKD_concat_kernel_learn': NKD_concat_kernel_learn,
     'NKD_concat_kernel_learn_v2': NKD_concat_kernel_learn_v2,
+    'NKD_concat_kernel_learn_v3': NKD_concat_kernel_learn_v3,
     'NKD_diff_kernel_learn': NKD_diff_kernel_learn,
     'NKD_rbf_feat_learn': NKD_rbf_feat_learn,
 }

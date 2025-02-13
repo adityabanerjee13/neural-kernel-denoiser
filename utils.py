@@ -6,8 +6,18 @@ import torch.nn as nn
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
 import matplotlib.pyplot as plt
+import pickle
 
 
+
+def save_pickle(data, file_path):
+    with open(file_path, 'wb') as file:
+        pickle.dump(data, file)
+
+def load_pickle(file_path):
+    with open(file_path, 'rb') as file:
+        data = pickle.load(file)
+    return data
 
 def linear_img_fwd(img, parameters: nn.Linear):
     out_channel, in_channel = parameters.weight.shape
@@ -45,6 +55,9 @@ def unpad(img, hp, wp):
         return img[:, :, hp:-hp, wp:-wp]
     else:
         raise ValueError(f'image shape {img.shape} is invalid')
+
+def pad(img, p, mode='circular'):
+    return torch.functional.F.pad(img, (p,p,p,p), mode=mode)
 
 def img2channel_list(img):
     if len(img.shape)==3:

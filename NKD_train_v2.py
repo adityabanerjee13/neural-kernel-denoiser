@@ -18,6 +18,8 @@ from dataset_loaders import Train_img_Dataset, TrainingDataset
 
 
 def train(args, verbose = False):
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
     # Setup device
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -120,7 +122,7 @@ def train(args, verbose = False):
         # Print progress
         if total_steps % args.progress_freq == 0:
             print(f"Epoch {epoch+1}/{args.epochs} | "
-                    f"Loss: {loss:.6f} | lr = {current_lr}", end='\r')
+                    f"Loss: {loss:.8f} | lr = {current_lr}", end='\r')
 
         # Regular checkpoint saving
         if total_steps % args.save_freq == 0:
@@ -138,7 +140,7 @@ def train(args, verbose = False):
 
         # Save epoch loss to log
         with open(os.path.join(args.out_folder, 'training_log.txt'), 'a') as f:
-            f.write(f'{epoch+1},{loss:.6f},{current_lr}\n')
+            f.write(f'{epoch+1},{loss:.8f},{current_lr}\n')
 
         if args.sch!='const':
             scheduler.step()
@@ -173,33 +175,32 @@ if __name__ == "__main__":
     # args.epochs, args.batch_size, args.lr, args.sch: 'multistep', 'warmup_cosine' or 'cosine', args.lr_step, args.lr_gamma, 
     # args.val_freq, args.save_freq, args.progress_freq, args.save_img_freq,
     # args.blind, args.patch_rad, args.window_rad, args.in_channel, args.latent_dim, args.latent_channel_dim
-    seed = 100
-    torch.manual_seed(seed)
-    np.random.seed(seed)
     class config:
         def __init__(self):
             pass
 
     args = config()
 
+    args.seed = 100
     # MODEL PARAMETERS
     # architecture = ['NKD_concat_kernel_learn']
-    architecture = ['NKD_concat_kernel_learn']
-    patch_rads = [5]
+    architecture = ['NKD_concat_kernel_learn_v3', 'NKD_concat_kernel_learn_v2']
+    patch_rads = [1,2]
     args.window_rad = 7
     args.in_channel = 1
-    args.latent_dim = 1024
+    latent_dims = [128, 256, 512]
     args.latent_channel_dim = 10
-    args.residual_depth = 2
-    proj_depths = [2,3,6]
+    args.residual_depth = 1
+    proj_depths = [1,2,3]
+    args.proj_res_flag = True
     args.blind = True
 
     # TRAINING PARAMETERS
     args.in_folder = './data'
     args.out_folder = './output'
     args.color_mode = 'gray'
-    args.sigma_min = 30
-    args.sigma_max = 30
+    args.sigma_min = 0
+    args.sigma_max = 2
     args.req_patches = True
     args.patch_size = 128
     args.epochs = 50000
@@ -231,16 +232,18 @@ if __name__ == "__main__":
     args.checkpoint_path = ''
     verbose = False
 
-    for proj_depth in proj_depths:
-        for patch_rad in patch_rads:
-            for arch in architecture:
-                print(arch, patch_rad)
-                args.out_folder = './output'
-                args.proj_depth = proj_depth
-                args.architecture = arch
-                args.patch_rad = patch_rad
-                if args.req_patches:
-                    args.patch_size = 2*(args.window_rad+args.patch_rad)+1
-                else:
-                    pass
-                _ = train(args, verbose)
+    for arch in architecture:
+        for latent_dim in latent_dims:
+            for patch_rad in patch_rads:
+                for proj_depth in proj_depths:
+                    print(arch, patch_rad)
+                    args.out_folder = './output'
+                    args.proj_depth = proj_depth
+                    args.architecture = arch
+                    args.patch_rad = patch_rad
+                    args.latent_dim = latent_dim
+                    if args.req_patches:
+                        args.patch_size = 2*(args.window_rad+args.patch_rad)+1
+                    else:
+                        pass
+                    _ = train(args, verbose)
