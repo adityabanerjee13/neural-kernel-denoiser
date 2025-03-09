@@ -2,8 +2,10 @@ import torch
 from deepinv.models import BM3D
 
 from models.NKD_linear_layer import NKD_latent_layers, NLM
+from NKD_models import NKD_denoisers
 from denoisers.NLM_torch import NLM_tensor
 from denoisers.TV import TV
+from utils import pad
 # from utils import load_checkpoint, save_checkpoint
 
 
@@ -45,27 +47,30 @@ def load_denoiser(architecture: torch.nn.Module, checkpoint: str, device: str) -
 
 
 class NKD_regularizer:
-    def __init__(self, architecture : torch.nn.Module, checkpoint : str, device : str, window_rad : int = 5):
+    def __init__(self, path : str, device : str, window_rad : int = 5, denoiser_span : int = 32):
         """
-        Initializes the class with the given architecture, checkpoint, and device.
+        Initializes the class with the given checkpoint path and device.
         Args:
-            architecture (class): The architecture type for the denoiser.
-            checkpoint (str): The path to the checkpoint file for loading the denoiser.
-            device (str): The device to run the denoiser on (e.g., 'cpu' or 'cuda').
+            path (str): The path to the checkpoint file for loading the denoiser.
+            device (str): The device to run the denoiser on (e.g., 'cpu' or 'cuda:0').
+            window_rad (int): window radius of denoiser.
+            denoiser_span (int): forward_img argument of NKD_denoisers.
         Attributes:
             denoiser: The loaded denoiser model.
             device (str): The device to run the denoiser on.
         """
-        self.denoiser = load_denoiser(architecture, checkpoint, device).to(device)
+        self.denoiser = NKD_denoisers.load_checkpoint(path, device)[0].to(device)
         self.denoiser.window_rad = window_rad
+        self.window_rad = window_rad
+        self.patch_rad = self.denoiser.patch_rad
+        self.span = denoiser_span
 
     def __call__(self, noisy_input, guide, sigma):
+        self.denoiser.eval()
+        p = self.patch_rad+self.window_rad
         with torch.no_grad():
-            feat = self.denoiser.get_features(guide, sigma)
-            out = NLM(noisy_input, feat, self.denoiser.window_rad, self.denoiser.sigma)
+            out = self.denoiser.NLM(noisy_input, guide, sig=sigma)
         return out
-    
-
 
 class NLM_regularizer:
     def __init__(self, patch_rad, window_rad, sigma):

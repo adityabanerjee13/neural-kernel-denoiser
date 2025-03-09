@@ -82,7 +82,7 @@ def load_images(path, color_mode='gray', subdirs=None, size=None):
 class Train_img_Dataset(Dataset):
     def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, 
                  imgs_per_epoch=128, req_patches=True, factor=None, size=None,
-                 no_patches=None, train_subdirs = ['img_barbara']):
+                 no_patches=None, train_subdirs = ['Set12']):
         """
         Training dataset that matches demo_training.py implementation
         Args:
@@ -145,7 +145,7 @@ class Train_img_Dataset(Dataset):
         return self.imgs_per_epoch  # As in demo_training.py
 
     def __getitem__(self, idx):
-        img = self.images_train[0]
+        img = self.images_train[idx]
 
         # Convert to float
         img = img.astype(np.float32) / 255.0
@@ -209,7 +209,8 @@ class Train_img_Dataset(Dataset):
         return torch.stack(img_patches)
 
 class TrainingDataset(Dataset):
-    def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, imgs_per_epoch=128, req_patches=True, no_patches = 128):
+    def __init__(self, in_folder, color_mode='gray', sigma_min=15, sigma_max=15, patch_size=70, 
+                 imgs_per_epoch=128, req_patches=True, no_patches = 128, size=None):
         """
         Training dataset that matches demo_training.py implementation
         Args:
@@ -239,7 +240,7 @@ class TrainingDataset(Dataset):
 
         # Load all images
         print("\nLoading training images...")
-        self.images_train = load_images(in_folder, color_mode, train_subdirs)
+        self.images_train = load_images(in_folder, color_mode, train_subdirs, size=size)
 
         # Filter by size
         valid_images = []
@@ -258,19 +259,54 @@ class TrainingDataset(Dataset):
     def __len__(self):
         return self.imgs_per_epoch  # As in demo_training.py
 
+    # def __getitem__(self, idx):
+    #     # Random sigma
+    #     sigma = np.random.uniform(
+    #         low=self.sigma_min/255, high=self.sigma_max/255)
+
+    #     # Random image
+    #     img = self.images_train[np.random.choice(self.number_of_images)]
+
+    #     # Get dimensions accounting for color mode
+    #     if self.color_mode == 'gray':
+    #         h, w = img.shape
+    #     else:
+    #         h, w, _ = img.shape
+
+    #     # Extract patch based on color mode
+    #     img = img.astype(np.float32) / 255.0
+
+    #     # Convert to torch tensors with proper shape
+    #     if self.color_mode == 'gray':
+    #         clean = torch.from_numpy(img).unsqueeze(0)
+    #     else:
+    #         clean = torch.from_numpy(img.transpose(2, 0, 1))
+
+    #     # Random augmentation
+    #     k = np.random.randint(8)
+    #     clean = augmentation(clean, k)
+
+    #     if self.req_patches:
+    #         clean_patches = self._extract_random_patches(clean)
+    #         b, c, h, w = clean_patches.shape
+    #         clean = clean_patches[:,:,h//2,w//2]
+    #         noisy = clean_patches + float(sigma)*torch.randn_like(clean_patches)
+    #         # Create sigma tensor
+    #         sigma_torch = sigma * torch.ones(b, 1, 1, 1)
+    #     else:
+    #         i = torch.randint(0, h - self.patch_size - 1)
+    #         j = torch.randint(0, w - self.patch_size - 1)
+    #         clean = clean[:, i:i+self.patch_size, j:j+self.patch_size]
+    #         noisy = clean + float(sigma)*torch.randn_like(clean)   
+    #         # Create sigma tensor
+    #         sigma_torch = sigma * torch.ones(1, 1, 1)
+
+    #     return clean, noisy, sigma_torch
+
     def __getitem__(self, idx):
-        # Random sigma
-        sigma = np.random.uniform(
-            low=self.sigma_min/255, high=self.sigma_max/255)
 
         # Random image
         img = self.images_train[np.random.choice(self.number_of_images)]
-
-        # Get dimensions accounting for color mode
-        if self.color_mode == 'gray':
-            h, w = img.shape
-        else:
-            h, w, _ = img.shape
 
         # Extract patch based on color mode
         img = img.astype(np.float32) / 255.0
@@ -284,20 +320,24 @@ class TrainingDataset(Dataset):
         # Random augmentation
         k = np.random.randint(8)
         clean = augmentation(clean, k)
+        _, h, w = clean.shape
 
         if self.req_patches:
             clean_patches = self._extract_random_patches(clean)
             b, c, h, w = clean_patches.shape
             clean = clean_patches[:,:,h//2,w//2]
-            noisy = clean_patches + float(sigma)*torch.randn_like(clean_patches)
+            # Random sigma
+            sigma = self.sigma_min/255 + torch.rand(b,)*(self.sigma_max-self.sigma_min)/255
+            noisy = clean_patches + (sigma[:,None, None, None]).expand_as(clean_patches) * torch.randn_like(clean_patches)
+            sigma_torch = sigma[:,None].reshape(-1, 1, 1, 1)
         else:
-            i = torch.randint(0, h - self.patch_size - 1)
-            j = torch.randint(0, w - self.patch_size - 1)
+            i = torch.randint(h - self.patch_size - 1, (1,)).item()
+            j = torch.randint(w - self.patch_size - 1, (1,)).item()
             clean = clean[:, i:i+self.patch_size, j:j+self.patch_size]
-            noisy = clean + float(sigma)*torch.randn_like(clean)   
-
-        # Create sigma tensor
-        sigma_torch = sigma * torch.ones(1, 1, 1)
+            # Random sigma
+            sigma = self.sigma_min/255 + torch.rand(1,)*(self.sigma_max-self.sigma_min)/255
+            noisy = clean + (sigma[:,None, None]).expand_as(clean) * torch.randn_like(clean)
+            sigma_torch = sigma * torch.ones(1, 1, 1)
 
         return clean, noisy, sigma_torch
 
@@ -369,7 +409,6 @@ class ValidationDataset(Dataset):
 
         return clean, noisy, sigma_torch
 
-
 # Example usage:
 def create_dataloaders(args):
     """Create training and validation dataloaders"""
@@ -440,7 +479,7 @@ class TestDataset(Dataset):
         if show:
             test_subdirs = ['curr_test']
         else:
-            test_subdirs = [d for d in os.listdir('./data/test_set') if os.path.isdir(os.path.join('./data/test_set', d))]
+            test_subdirs = [d for d in os.listdir('./data/test_set') if os.path.isdir(os.path.join('./data/test', d))]
         # Load all images
         print("\nLoading testing images...")
         self.images_test = load_images(in_folder, color_mode, test_subdirs)

@@ -3,6 +3,7 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 import time
+import tqdm
 
 from PnP.linear_models import linear
 
@@ -65,7 +66,7 @@ def initialize_median_filter(observed_image, application_matrix, kernal_radius= 
     device = observed_image.device
     out = np.zeros((h,w,c))
     for i in range(c):
-        initial_image = observed_image.permute(0, 2, 3, 1).contiguous().squeeze().clone().detach().cpu().numpy()[:, :, i]
+        initial_image = observed_image.permute(0, 2, 3, 1).contiguous().squeeze(0).clone().detach().cpu().numpy()[:, :, i]
         #we get the indices from the inpainting mask where the value is 0
         indices_mask = np.where(application_matrix.squeeze().clone().detach().cpu().numpy() == 0)
         #at all the indices  from indices_mask we will replace the value in observed_image with Inf
@@ -132,7 +133,7 @@ class IP_solver:
         xk_norms = []
         error_norms = []
         
-        for i in range(params.max_iter):
+        for i in tqdm.tqdm(range(params.max_iter)):
             # print(i)
             grad = grad_f(xk, params.b, lin_op)
             g = xk - (1/L)*grad
@@ -146,8 +147,8 @@ class IP_solver:
                 xkp1 = prox_op(g, guide, sigma)
             
             # Calculate and store norms
-            xk_norm = np.linalg.norm(xkp1)
-            error_norm = np.linalg.norm(xkp1 - params.ground_truth)
+            xk_norm = torch.linalg.norm(xkp1)
+            error_norm = torch.linalg.norm(xkp1 - params.ground_truth)
             
             xk_norms.append(xk_norm)
             error_norms.append(error_norm)

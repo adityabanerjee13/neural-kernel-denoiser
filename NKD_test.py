@@ -187,15 +187,13 @@ def create_combined_checker_matrix(size=64, checker_sizes = [1, 3, 5, 7]):
 
 def TestDenoisers(data_loader, denoisers, device, out_folder, p=0, state='', verbose=False):
     if verbose:
-        print('==== Test ====')
+        print('======================== Test ========================')
     # Create a figure to save the images
     grid = (len(denoisers), 3)
 
     # Loop through the validation loader
     image_info = [[], []]
     for i, data in enumerate(data_loader):
-        if i!=20:
-            continue
         if verbose:
             print(f'Image:- {i}')
 
@@ -228,7 +226,11 @@ def TestDenoisers(data_loader, denoisers, device, out_folder, p=0, state='', ver
             elif 'nkd' in name.lower():
                 denoisers[name].eval()
                 with torch.no_grad():
-                    denoised_image = denoisers[name].forward_img(noisy_image, sigma, span=32)
+                    denoised_image = denoisers[name].forward_img(noisy_image, sig=sigma, span=32)
+            elif 'kpn' in name.lower():
+                with torch.no_grad():
+                    denoised_image = denoisers[name](unpadded_noisy_image.unsqueeze(0), sigma)
+                    clean_image = clean_image.unsqueeze(0)
             else:
                 with torch.no_grad():
                     denoised_image = denoisers[name](unpadded_noisy_image, sigma)
@@ -383,32 +385,35 @@ if __name__ == '__main__':
     device = "cuda:0"
 
     n_channels = 1  # number of color channels in the input image
-    window_rad = 10
+    window_rad = 7
 
     denoiser_nlm = lambda x, y : NLM_tensor(x, x, 1, 9, 110/255, False)
     denoiser_bm3d = BM3D()
     denoiser_tv = TV(0.079579, 20, 0, 1, 'isotropic')
     
-    ckpt_list = list(range(50000, 51000, 1000))
+    ckpt_list = list(range(11000, 31000, 1000))
     print('checkpoints being computed:',ckpt_list)
 
     for step in ckpt_list:
         out_folder_imgs = './checkpoint_test/output_images'
         # if not os.path.exists():
         #     os.mkdir(out_folder_imgs)
-        denoiser_nkd_concat1 = NKD_denoisers.load_checkpoint(f'/home/aditya/NKD/output__concat_kl_5711024_22_130_30_0210061008/ckpt/model_step_{step}.pth',
+        denoiser_nkd_concat1 = NKD_denoisers.load_checkpoint(f'/home/aditya/Project/NKD/output__concat_kl_v2_571128_12_130_30_0211191259/ckpt/model_step_{step}.pth',
                                         device=device)[0]
 
-        denoiser_nkd_concat2 = NKD_denoisers.load_checkpoint(f'/home/aditya/NKD/output__concat_kl_5711024_23_130_30_0210160327/ckpt/model_step_{step}.pth',
+        denoiser_nkd_concat2 = NKD_denoisers.load_checkpoint(f'/home/aditya/Project/NKD/output__concat_kl_v2_571128_22_130_30_0211194458/ckpt/model_step_{step}.pth',
                                         device=device)[0]
 
-        denoiser_nkd_concat3 = NKD_denoisers.load_checkpoint(f'/home/aditya/NKD/output__concat_kl_5711024_24_130_30_0209194911/ckpt/model_step_{step}.pth',
+        denoiser_nkd_concat3 = NKD_denoisers.load_checkpoint(f'/home/aditya/Project/NKD/output__concat_kl_v2_571256_12_130_30_0211205911/ckpt/model_step_{step}.pth',
                                         device=device)[0]
 
-        denoiser_nkd_concat4 = NKD_denoisers.load_checkpoint(f'/home/aditya/NKD/output__concat_kl_5711024_25_130_30_0209001822/ckpt/model_step_{step}.pth',
+        denoiser_nkd_concat4 = NKD_denoisers.load_checkpoint(f'/home/aditya/Project/NKD/output__concat_kl_v2_571256_22_130_30_0211214721/ckpt/model_step_{step}.pth',
                                         device=device)[0]
 
-        denoiser_nkd_concat5 = NKD_denoisers.load_checkpoint(f'/home/aditya/NKD/output__concat_kl_5711024_26_130_30_0211020516/ckpt/model_step_{step}.pth',
+        denoiser_nkd_concat5 = NKD_denoisers.load_checkpoint(f'/home/aditya/Project/NKD/output__concat_kl_v2_571512_12_130_30_0211235054/ckpt/model_step_{step}.pth',
+                                        device=device)[0]
+        
+        denoiser_nkd_concat6 = NKD_denoisers.load_checkpoint(f'/home/aditya/Project/NKD/output__concat_kl_v2_5711024_12_130_30_0212091737/ckpt/model_step_{step}.pth',
                                         device=device)[0]
         denoiser_nkd_concat1.window_rad = window_rad
         denoiser_nkd_concat1.sigma = 1
@@ -420,18 +425,21 @@ if __name__ == '__main__':
         denoiser_nkd_concat4.sigma = 1
         denoiser_nkd_concat5.window_rad = window_rad
         denoiser_nkd_concat5.sigma = 1
+        denoiser_nkd_concat6.window_rad = window_rad
+        denoiser_nkd_concat6.sigma = 1
         denoisers = {}
         denoisers['TV'] = denoiser_tv
         denoisers['BM3D'] = denoiser_bm3d
         denoisers['NLM'] = denoiser_nlm
-        denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 2, proj. depth 2, latent dim = 1024 \n'] = denoiser_nkd_concat1
-        # denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 2, proj. depth 3, latent dim = 1024 \n'] = denoiser_nkd_concat2
-        denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 2, proj. depth 4, latent dim = 1024 \n'] = denoiser_nkd_concat3
-        # denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 2, proj. depth 5, latent dim = 1024 \n'] = denoiser_nkd_concat4
-        denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 2, proj. depth 6, latent dim = 1024 \n'] = denoiser_nkd_concat5
+        denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 1, proj. depth 2, latent dim = 128 \n'] = denoiser_nkd_concat1
+        denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 2, proj. depth 2, latent dim = 128 \n'] = denoiser_nkd_concat2
+        denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 1, proj. depth 2, latent dim = 256 \n'] = denoiser_nkd_concat3
+        denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 2, proj. depth 2, latent dim = 256 \n'] = denoiser_nkd_concat4
+        denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 1, proj. depth 2, latent dim = 512 \n'] = denoiser_nkd_concat5
+        denoisers['NKD kernel function learn: \n concatenate patchs w/h res. depth = 1, proj. depth 2, latent dim = 1024 \n'] = denoiser_nkd_concat6
         
-        padding_dim = denoiser_nkd_concat5.patch_rad + denoiser_nkd_concat5.window_rad
-        testset = TestDataset('./data/test_set', 'gray', 30)
+        padding_dim = denoiser_nkd_concat6.patch_rad + denoiser_nkd_concat6.window_rad
+        testset = TestDataset('./NKD_data/test_set', 'gray', 30)
 
         test_loader = DataLoader(
             testset,
@@ -443,12 +451,12 @@ if __name__ == '__main__':
         
         psnr_values, ssim_values = CheckerTestDenoisers(30, 64, denoisers, device, state=step, out_folder=out_folder_imgs, p=padding_dim, verbose=True)
 
-        # stats = {
-        #     'psnr_dicts,TestDenoisers': psnr_dicts,
-        #     'ssim_dicts,TestDenoisers': ssim_dicts,
-        #     'psnr_values,CheckerTestDenoisers': psnr_values,
-        #     'ssim_values,CheckerTestDenoisers': ssim_values
-        # }
+        stats = {
+            'psnr_dicts,TestDenoisers': psnr_dicts,
+            'ssim_dicts,TestDenoisers': ssim_dicts,
+            'psnr_values,CheckerTestDenoisers': psnr_values,
+            'ssim_values,CheckerTestDenoisers': ssim_values
+        }
 
-        # save_pickle(stats, os.path.join('./checkpoint_test/stats', f'pickle_ckpt_{step}.pkl'))
-        # print('Completed step:', step)
+        save_pickle(stats, os.path.join('./checkpoint_test/stats', f'pickle_ckpt_{step}.pkl'))
+        print('Completed step:', step)

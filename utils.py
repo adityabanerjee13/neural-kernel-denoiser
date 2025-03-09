@@ -1,14 +1,58 @@
 import numpy as np
 import os
 import math
+from datetime import datetime
 import torch
 import torch.nn as nn
+from einops import rearrange
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
 import matplotlib.pyplot as plt
 import pickle
+import h5py
 
 
+
+
+
+
+def gradient_transform(x):
+    outsize = (x.size(0), x.size(1), x.size(2)-1, x.size(3)-1)
+    out = torch.zeros(outsize)
+    dx = torch.tensor([[[[-1,1]]]], dtype=x.dtype, device = x.device)
+    dy = torch.tensor([[[[-1],[1]]]], dtype=x.dtype, device = x.device)
+
+    for i in range(x.size(1)):
+        temp = torch.functional.F.conv2d(x[:, i:i+1, :, :], dx)
+        out[:, i:i+1, :, :] = torch.functional.F.conv2d(temp, dy)
+
+    return out
+
+def sRGB(x):
+    return torch.where(x <= 0.0031308, 12.92 * x, 1.055 * x**(1 / 2.4) - 0.055)
+
+def extract_motion_blur_kernels(random=False, index=None):
+    kernel_path = './kernels/Levin09.mat'
+    # Extract actual kernel data from HDF5 object references
+    with h5py.File(kernel_path, 'r') as file:
+        data = file['kernels']
+        # Extract data from the HDF5 dataset
+        kernels = np.array(data)
+        kernel_list = [np.array(file[ref]) for ref in kernels.flatten()]
+
+    if random:
+        index = np.random.choice(len(kernel_list), 1)[0]
+
+    if index is not None:
+        kernel = kernel_list[index]
+    else:
+        kernel = kernel_list[0]
+
+    return kernel
+
+
+def date_time_stamp(format = "%m%d%H%M%S"):
+    return datetime.now().strftime(format)
 
 def save_pickle(data, file_path):
     with open(file_path, 'wb') as file:
@@ -66,7 +110,7 @@ def img2channel_list(img):
     elif len(img.shape)==4:
         b, c, _, _ = img.shape
         return img.permute(0,2,3,1).reshape(b, -1, c)
-    
+
 def channel_list2img(channel_list, h, w):
     if len(channel_list.shape)==2:
         n, c = channel_list.shape
@@ -148,6 +192,39 @@ def save_checkpoint(out_folder, state, step, is_best=False, _state=None):
         checkpoint_path = os.path.join(out_folder, f'model{_state}_step_{step}.pth')
     
     torch.save(state, checkpoint_path)
+
+def get_patch_position_embedding(pos_emb_dim, grid_size, device):
+    assert pos_emb_dim % 4 == 0, 'Position embedding dimension must be divisible by 4'
+    grid_size_h, grid_size_w = grid_size
+    grid_h = torch.arange(grid_size_h, dtype=torch.float32, device=device)
+    grid_w = torch.arange(grid_size_w, dtype=torch.float32, device=device)
+    grid = torch.meshgrid(grid_h, grid_w, indexing='ij')
+    grid = torch.stack(grid, dim=0)
+
+    # grid_h_positions -> (Number of patch tokens,)
+    grid_h_positions = grid[0].reshape(-1)
+    grid_w_positions = grid[1].reshape(-1)
+
+    # factor = 10000^(2i/d_model)
+    factor = 10000 ** ((torch.arange(
+        start=0,
+        end=pos_emb_dim // 4,
+        dtype=torch.float32,
+        device=device) / (pos_emb_dim // 4))
+    )
+
+    grid_h_emb = grid_h_positions[:, None].repeat(1, pos_emb_dim // 4) / factor
+    grid_h_emb = torch.cat([torch.sin(grid_h_emb), torch.cos(grid_h_emb)],dim=-1)
+    # grid_h_emb -> (Number of patch tokens, pos_emb_dim // 2)
+
+    grid_w_emb = grid_w_positions[:, None].repeat(1, pos_emb_dim // 4) / factor
+    grid_w_emb = torch.cat([torch.sin(grid_w_emb), torch.cos(grid_w_emb)],dim=-1)
+    # grid_w_emb -> (Number of patch tokens, pos_emb_dim // 2)
+
+    pos_emb = torch.cat([grid_h_emb, grid_w_emb], dim=-1)
+    # pos_emb -> (Number of patch tokens, pos_emb_dim)
+
+    return rearrange(pos_emb, '(h w) d -> d h w', h=grid_size_h, w=grid_size_w)
 
 def calculate_psnr(batch1, batch2):
     psnr_scores = []
@@ -251,7 +328,7 @@ def show_tensor_image(image_tensors : list, grid : tuple, titles=None, save=Fals
             else:
                 plt.imshow(np_image, cmap='gray', vmin=vmin, vmax=vmax)
                 if titles:
-                    plt.set_title(titles[index])
+                    plt.title(titles[index])
                 plt.axis('off')
 
     # plt.tight_layout()
